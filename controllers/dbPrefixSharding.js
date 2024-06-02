@@ -1,6 +1,6 @@
-import pools from "./database/connDB.js";
-import funcDB from "./database/funcDB.js";
-const { newUrl, updateClicks, getUrl, deleteUrl } = funcDB;
+import pools from "../database/connDB.js";
+import funcDB from "../database/funcDB.js";
+const { newUrl, updateClicks, getAllUrl, getUrl, deleteUrl } = funcDB;
 
 const Groups = [];
 //base62 encoded url
@@ -12,24 +12,15 @@ async function dbPrefixSharding(long, short) {
       return insertWithLock(i, long, short);
     }
   }
+  throw new Error(`${short} Error! Cannot find responding PrefixSharding DB!`);
 }
 
 async function insertWithLock(index, long, short) {
-  const result = { isSuccess: false, message: "" };
+  //lock 耗時（用 unique key 可改善）
   const conn = await pools[index].getConnection();
-  try {
-    //lock 耗時（用 unique key 可改善）
-    await conn.query(`LOCK TABLES urls READ;`);
-    await newUrl(conn, long, short);
-    await conn.query(`UNLOCK TABLES;`);
-
-    result.isSuccess = true;
-    result.message = `db-${index} insert ${short} successfully.`;
-  } catch (err) {
-    console.error("insertWithLock error:" + err.message);
-    result.isSuccess = false;
-    result.message = err.message;
-  }
+  await conn.query(`LOCK TABLES urls READ;`);
+  const result = await newUrl(conn, long, short);
+  await conn.query(`UNLOCK TABLES;`);
   return result;
 }
 
@@ -53,17 +44,16 @@ function getShardingGroups(num) {
       }
     }
   }
-
   return Groups;
 }
-
-async function checkDB(short) {
+function checkPrefixDB(short) {
   const head = short[0];
   for (let i = 0; i < Groups.length; i++) {
     if (Groups[i].includes(head)) {
       return i;
     }
   }
+  throw new Error(`${short} Error! Cannot find responding PrefixSharding DB!`);
 }
 
-export default { dbPrefixSharding, checkDB };
+export default { dbPrefixSharding, checkPrefixDB };

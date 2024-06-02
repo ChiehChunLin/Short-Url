@@ -1,10 +1,12 @@
-import pools from "./database/connDB.js";
-import funcDB from "./database/funcDB.js";
+import pools from "../database/connDB.js";
+import funcDB from "../database/funcDB.js";
+import { encodeBase62 } from "../utils/intToBase62.js";
 const { newUrl, updateClicks, getUrl, deleteUrl, countUrl } = funcDB;
 
 //URL:500 bytes/ea
 //RDS:20 GB * 1024^3 /500 => 42949673 urls
 //Threshold: 50%          => 21474836 urls
+const RDS_START = 100000000000; //turns Base62 into 7 codes
 const RDS_LIMIT = 20000000; //2*10^7
 let DBs_STD = [];
 let DBs_COUNT = [];
@@ -12,8 +14,8 @@ let DBs_COUNT = [];
 //因為 short  key 不重複，所以也不需要管 lock
 async function dbRangeSharding(long, short) {
   const { index, value } = getShardingGroups(pools.length);
+  const newShort = encodeBase62(value);
   const conn = await pools[index].getConnection();
-  const newShort = value.toString() + short;
   const insertId = await newUrl(conn, long, newShort);
   DBs_COUNT[index]++;
   console.log(
@@ -31,7 +33,7 @@ async function getShardingGroups(num) {
     for (let i = 0; i < pools.length; i++) {
       const conn = await pools[i].getConnection();
       const count = await countUrl(conn);
-      DBs_STD.push(RDS_LIMIT * (i + 1));
+      DBs_STD.push(RDS_START + RDS_LIMIT * i);
       DBs_COUNT.push(count);
     }
   }
@@ -41,7 +43,7 @@ async function getShardingGroups(num) {
   return start;
 }
 
-async function checkDB(short) {
+function checkRangeDB(short) {
   const number = Number(short.substring(0, RDS_LIMIT.toString().length));
   for (let i = 0; i < pools.length; i++) {
     if (number > (i + 1) * RDS_LIMIT && number < (i + 2) * RDS_LIMIT) return i;
@@ -51,5 +53,5 @@ async function checkDB(short) {
 
 export default {
   dbRangeSharding,
-  checkDB
+  checkRangeDB
 };
